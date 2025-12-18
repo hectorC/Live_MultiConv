@@ -1,0 +1,78 @@
+# =========================
+# JUCE + Visual Studio (Windows) .gitignore
+# Repo root: Live_MultiConv
+# =========================
+
+# --- Visual Studio user/cache files ---
+.vs/
+**/.vs/
+
+# User-specific files
+*.user
+*.userosscache
+*.suo
+*.rsuser
+*.userprefs
+
+# VS/IntelliSense/Code Analysis caches
+*.VC.db
+*.VC.VC.opendb
+ipch/
+*.ipch
+
+# Build system intermediates
+*.obj
+*.pdb
+*.idb
+*.ilk
+*.pch
+*.tlog
+*.log
+*.lastbuildstate
+*.unsuccessfulbuild
+*.cache
+*.aps
+*.ncb
+
+# MSBuild/VS artifacts
+[Bb]in/
+[Oo]bj/
+
+# CMake (if ever used)
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+
+# --- JUCE Projucer exporter build folders ---
+# Typically regenerated, and often huge
+Builds/
+
+# --- Plugin/package outputs (often inside Builds/, but keep generic) ---
+**/*.vst3/
+**/*.component/
+**/*.app/
+**/*.aaxplugin/
+**/*.lv2/
+**/*.clap/
+
+# --- macOS/Linux extras (harmless on Windows) ---
+.DS_Store
+*.dSYM/
+
+# --- Crash dumps ---
+*.dmp
+
+# --- Temporary/editor files ---
+*.tmp
+*.temp
+*.swp
+*~
+
+# --- Project-specific logs created during troubleshooting ---
+_build_install_log*.txt
+_msbuild_probe*.txt
+_copilot_io_probe*.txt
+_terminal_bridge_test*.txt
+
+# --- Optional: keep JUCE module cache out of git if it appears ---
+JuceLibraryCode/modules/
