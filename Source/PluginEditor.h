@@ -33,6 +33,7 @@ private:
   void timerCallback() override;
 
   juce::Label statusLabel;
+  juce::Label convChannelsLabel;
   juce::TextButton recordButton { "Record" };
   juce::TextButton clearButton { "Clear Buffer" };
 

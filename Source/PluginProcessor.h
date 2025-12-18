@@ -60,6 +60,28 @@ public:
     void clearIR();
     juce::String getStatusText() const;
 
+    int getIRChannelCount() const
+    {
+      return irHasContent.load (std::memory_order_acquire)
+               ? irNumChannels.load (std::memory_order_acquire)
+               : 0;
+    }
+
+    int getConvolutionBufferChannelCount() const
+    {
+      const auto bankCh = convolutionBankChannels.load (std::memory_order_acquire);
+      if (bankCh <= 0)
+        return 0;
+
+      const auto ioCh = currentIOChannels.load (std::memory_order_acquire);
+      return juce::jlimit (0, 16, juce::jmin (bankCh, ioCh));
+    }
+
+    int getCurrentIOChannelCount() const
+    {
+      return juce::jlimit (0, 16, currentIOChannels.load (std::memory_order_acquire));
+    }
+
     enum class RunState
     {
       passThroughEmpty = 0,
@@ -133,6 +155,10 @@ private:
     std::atomic<bool> irHasContent { false };
 
     int lastKnownNumChannels = 0;
+
+    // UI-visible counters (avoid racing shared_ptr access from message thread)
+    std::atomic<int> currentIOChannels { 0 };
+    std::atomic<int> convolutionBankChannels { 0 };
 
     // Processing buffers
     juce::AudioBuffer<float> dryBuffer;

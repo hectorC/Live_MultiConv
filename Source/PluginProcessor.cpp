@@ -358,6 +358,8 @@ void NewProjectAudioProcessor::prepareToPlay (double sampleRate, int samplesPerB
     }
 
     lastKnownNumChannels = 0;
+    currentIOChannels.store (0, std::memory_order_release);
+    convolutionBankChannels.store (0, std::memory_order_release);
 
     dryBuffer.setSize (maxChannels, samplesPerBlock, false, false, true);
     oldWetBuffer.setSize (maxChannels, samplesPerBlock, false, false, true);
@@ -377,6 +379,7 @@ void NewProjectAudioProcessor::prepareToPlay (double sampleRate, int samplesPerB
     activeBank.reset();
 
     lastKnownNumChannels = juce::jmin (getTotalNumInputChannels(), getTotalNumOutputChannels());
+    currentIOChannels.store (juce::jlimit (0, 16, lastKnownNumChannels), std::memory_order_release);
 
     if (irHasContent.load (std::memory_order_acquire)
         && irNumChannels.load (std::memory_order_acquire) > 0
@@ -441,6 +444,8 @@ void NewProjectAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
         buffer.clear (i, 0, buffer.getNumSamples());
 
     const int numChannels = juce::jmin (16, totalNumInputChannels);
+    currentIOChannels.store (juce::jlimit (0, 16, juce::jmin ((int) totalNumOutputChannels, numChannels)),
+                             std::memory_order_release);
     const int numSamples = buffer.getNumSamples();
 
     if (numSamples > dryBuffer.getNumSamples())
@@ -610,6 +615,7 @@ void NewProjectAudioProcessor::resetForLayoutOrClear (bool keepParameters)
     irNumChannels.store (0, std::memory_order_release);
     irLengthSamples.store (0, std::memory_order_release);
     irWritePos = 0;
+    convolutionBankChannels.store (0, std::memory_order_release);
 
     {
         const juce::SpinLock::ScopedLockType lock (pendingBankLock);
@@ -706,6 +712,7 @@ void NewProjectAudioProcessor::trySwapInPendingBank()
     }
 
     activeBank = std::move (newBank);
+    convolutionBankChannels.store ((int) activeBank->convolvers.size(), std::memory_order_release);
 }
 
 //==============================================================================

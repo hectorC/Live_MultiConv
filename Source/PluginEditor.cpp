@@ -30,7 +30,13 @@ NewProjectAudioProcessorEditor::NewProjectAudioProcessorEditor (NewProjectAudioP
 {
   statusLabel.setJustificationType (juce::Justification::centredLeft);
   statusLabel.setText ("Pass-through", juce::dontSendNotification);
+  statusLabel.setColour (juce::Label::textColourId, juce::Colours::white);
   addAndMakeVisible (statusLabel);
+
+  convChannelsLabel.setJustificationType (juce::Justification::centredLeft);
+  convChannelsLabel.setText ("Channels: 0", juce::dontSendNotification);
+  convChannelsLabel.setColour (juce::Label::textColourId, juce::Colours::white);
+  addAndMakeVisible (convChannelsLabel);
 
   recordButton.setClickingTogglesState (false);
   recordButton.onClick = [this]
@@ -82,7 +88,7 @@ NewProjectAudioProcessorEditor::NewProjectAudioProcessorEditor (NewProjectAudioP
   mixAttachment = std::make_unique<SliderAttachment> (apvts, "mix", mixSlider);
   trimAttachment = std::make_unique<SliderAttachment> (apvts, "trimDb", trimSlider);
 
-  setSize (520, 280);
+  setSize (520, 300);
   startTimerHz (15);
 }
 
@@ -98,17 +104,22 @@ void NewProjectAudioProcessorEditor::paint (juce::Graphics& g)
 
   g.setColour (juce::Colours::white);
   g.setFont (juce::FontOptions (14.0f));
-  g.drawText ("Live MultiConv", 12, 8, getWidth() - 24, 20, juce::Justification::centredLeft);
+  g.drawText ("Live MultiConv", 12, 8, getWidth() - 24, 18, juce::Justification::centredLeft);
 }
 
 void NewProjectAudioProcessorEditor::resized()
 {
   auto r = getLocalBounds().reduced (12);
-  auto top = r.removeFromTop (32);
+  auto top = r.removeFromTop (76);
 
-  statusLabel.setBounds (top.removeFromLeft (200));
-  clearButton.setBounds (top.removeFromRight (120));
-  recordButton.setBounds (top.removeFromRight (100).reduced (0, 2));
+  auto buttonsArea = top.removeFromRight (230);
+  clearButton.setBounds (buttonsArea.removeFromRight (120));
+  recordButton.setBounds (buttonsArea.removeFromRight (100).reduced (0, 2));
+
+  auto leftArea = top;
+  leftArea.removeFromTop (22); // reserved for the title drawn in paint()
+  statusLabel.setBounds (leftArea.removeFromTop (20));
+  convChannelsLabel.setBounds (leftArea.removeFromTop (20));
 
   r.removeFromTop (10);
 
@@ -134,4 +145,7 @@ void NewProjectAudioProcessorEditor::resized()
 void NewProjectAudioProcessorEditor::timerCallback()
 {
   statusLabel.setText ("Status: " + audioProcessor.getStatusText(), juce::dontSendNotification);
+
+  const auto ch = audioProcessor.getCurrentIOChannelCount();
+  convChannelsLabel.setText ("Channels: " + juce::String (ch), juce::dontSendNotification);
 }
