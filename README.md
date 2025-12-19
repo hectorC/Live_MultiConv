@@ -51,7 +51,7 @@ This repo is generated from **Projucer** and is intended to be built using the n
 
 ### 1) Export the Visual Studio project (Projucer)
 
-1. Open `NewProject.jucer` in **Projucer**.
+1. Open `Live_MultiConv.jucer` in **Projucer**.
 2. Select the **Visual Studio 2022** exporter.
 3. Click **Save Project** (this regenerates `Builds/VisualStudio2022/`).
 
@@ -122,7 +122,7 @@ After copying the bundle, rescan plugins in your DAW.
 
 - DSP + state/parameters: `Source/PluginProcessor.*`
 - UI: `Source/PluginEditor.*`
-- Projucer project: `NewProject.jucer`
+- Projucer project: `Live_MultiConv.jucer`
 - VS2022 exporter projects: `Builds/VisualStudio2022/*.vcxproj`
 
 ## License
