@@ -82,6 +82,11 @@ public:
       return juce::jlimit (0, 16, currentIOChannels.load (std::memory_order_acquire));
     }
 
+    int getRequestedProcessChannelCount() const
+    {
+      return juce::jlimit (1, 16, requestedProcessChannels.load (std::memory_order_acquire));
+    }
+
     enum class RunState
     {
       passThroughEmpty = 0,
@@ -159,6 +164,7 @@ private:
     // UI-visible counters (avoid racing shared_ptr access from message thread)
     std::atomic<int> currentIOChannels { 0 };
     std::atomic<int> convolutionBankChannels { 0 };
+    std::atomic<int> requestedProcessChannels { 16 };
 
     // Processing buffers
     juce::AudioBuffer<float> dryBuffer;

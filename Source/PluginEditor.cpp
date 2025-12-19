@@ -38,6 +38,16 @@ NewProjectAudioProcessorEditor::NewProjectAudioProcessorEditor (NewProjectAudioP
   convChannelsLabel.setColour (juce::Label::textColourId, juce::Colours::white);
   addAndMakeVisible (convChannelsLabel);
 
+  // Number-box style (stepper) rather than a casual slider.
+  processChannelsSlider.setSliderStyle (juce::Slider::IncDecButtons);
+  processChannelsSlider.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 70, 20);
+  processChannelsSlider.setRange (1.0, 16.0, 1.0);
+  processChannelsSlider.setNumDecimalPlacesToDisplay (0);
+  processChannelsSlider.setName ("Process Channels");
+  addAndMakeVisible (processChannelsSlider);
+  configureLabel (processChannelsLabel, "Process Channels");
+  addAndMakeVisible (processChannelsLabel);
+
   recordButton.setClickingTogglesState (false);
   recordButton.onClick = [this]
   {
@@ -87,8 +97,9 @@ NewProjectAudioProcessorEditor::NewProjectAudioProcessorEditor (NewProjectAudioP
   fadeOutAttachment = std::make_unique<SliderAttachment> (apvts, "fadeOutPct", fadeOutSlider);
   mixAttachment = std::make_unique<SliderAttachment> (apvts, "mix", mixSlider);
   trimAttachment = std::make_unique<SliderAttachment> (apvts, "trimDb", trimSlider);
+  processChannelsAttachment = std::make_unique<SliderAttachment> (apvts, "processChannels", processChannelsSlider);
 
-  setSize (520, 300);
+  setSize (520, 380);
   startTimerHz (15);
 }
 
@@ -136,6 +147,7 @@ void NewProjectAudioProcessorEditor::resized()
   };
 
   placeRow (recordLengthMsLabel, recordLengthMsSlider);
+  placeRow (processChannelsLabel, processChannelsSlider);
   placeRow (fadeInLabel, fadeInSlider);
   placeRow (fadeOutLabel, fadeOutSlider);
   placeRow (mixLabel, mixSlider);
@@ -146,6 +158,17 @@ void NewProjectAudioProcessorEditor::timerCallback()
 {
   statusLabel.setText ("Status: " + audioProcessor.getStatusText(), juce::dontSendNotification);
 
-  const auto ch = audioProcessor.getCurrentIOChannelCount();
-  convChannelsLabel.setText ("Channels: " + juce::String (ch), juce::dontSendNotification);
+  const auto ioCh = audioProcessor.getCurrentIOChannelCount();
+  const auto maxCh = juce::jmax (1, juce::jmin (16, ioCh));
+
+  if ((int) std::llround (processChannelsSlider.getMaximum()) != maxCh)
+      processChannelsSlider.setRange (1.0, (double) maxCh, 1.0);
+
+  if ((int) std::llround (processChannelsSlider.getValue()) > maxCh)
+      processChannelsSlider.setValue ((double) maxCh, juce::sendNotificationSync);
+
+  const auto reqCh = audioProcessor.getRequestedProcessChannelCount();
+  const auto bankCh = audioProcessor.getConvolutionBufferChannelCount();
+  const auto effectiveCh = juce::jmax (0, juce::jmin (ioCh, juce::jmin (reqCh, bankCh)));
+  convChannelsLabel.setText ("Channels: " + juce::String (effectiveCh), juce::dontSendNotification);
 }

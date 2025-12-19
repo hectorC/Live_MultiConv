@@ -76,3 +76,4 @@ _terminal_bridge_test*.txt
 
 # --- Optional: keep JUCE module cache out of git if it appears ---
 JuceLibraryCode/modules/
+.github/copilot-instructions.md

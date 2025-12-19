@@ -12,6 +12,7 @@
 namespace ParamIDs
 {
     static constexpr auto recordLengthMs = "recordLengthMs";
+    static constexpr auto processChannels = "processChannels";
     static constexpr auto fadeInPct = "fadeInPct";
     static constexpr auto fadeOutPct = "fadeOutPct";
     static constexpr auto mix = "mix";
@@ -38,12 +39,14 @@ NewProjectAudioProcessor::NewProjectAudioProcessor()
     , apvts (*this, nullptr, "PARAMS", createParameterLayout())
     , rebuildThread (*this)
 {
+    apvts.addParameterListener (ParamIDs::processChannels, this);
     apvts.addParameterListener (ParamIDs::fadeInPct, this);
     apvts.addParameterListener (ParamIDs::fadeOutPct, this);
 }
 
 NewProjectAudioProcessor::~NewProjectAudioProcessor()
 {
+    apvts.removeParameterListener (ParamIDs::processChannels, this);
     apvts.removeParameterListener (ParamIDs::fadeInPct, this);
     apvts.removeParameterListener (ParamIDs::fadeOutPct, this);
 }
@@ -51,6 +54,13 @@ NewProjectAudioProcessor::~NewProjectAudioProcessor()
 juce::AudioProcessorValueTreeState::ParameterLayout NewProjectAudioProcessor::createParameterLayout()
 {
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
+
+    params.push_back (std::make_unique<juce::AudioParameterInt> (
+        ParamIDs::processChannels,
+        "Process Channels",
+        1,
+        16,
+        16));
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         ParamIDs::recordLengthMs,
@@ -443,9 +453,13 @@ void NewProjectAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
     for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
         buffer.clear (i, 0, buffer.getNumSamples());
 
-    const int numChannels = juce::jmin (16, totalNumInputChannels);
-    currentIOChannels.store (juce::jlimit (0, 16, juce::jmin ((int) totalNumOutputChannels, numChannels)),
-                             std::memory_order_release);
+    const int ioChannels = juce::jmin (16, juce::jmin (totalNumInputChannels, totalNumOutputChannels));
+    currentIOChannels.store (juce::jlimit (0, 16, ioChannels), std::memory_order_release);
+
+    const int requestedCh = (int) std::llround (apvts.getRawParameterValue (ParamIDs::processChannels)->load());
+    requestedProcessChannels.store (juce::jlimit (1, 16, requestedCh), std::memory_order_release);
+    const int processCh = juce::jlimit (1, juce::jmax (1, ioChannels), requestedCh);
+
     const int numSamples = buffer.getNumSamples();
 
     if (numSamples > dryBuffer.getNumSamples())
@@ -460,9 +474,9 @@ void NewProjectAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
         resetForLayoutOrClear (false);
 
     // Reset if host changed channel count.
-    if (numChannels != lastKnownNumChannels || totalNumOutputChannels != lastKnownNumChannels)
+    if (ioChannels != lastKnownNumChannels)
     {
-        lastKnownNumChannels = juce::jmin (numChannels, totalNumOutputChannels);
+        lastKnownNumChannels = ioChannels;
         resetForLayoutOrClear (true);
     }
 
@@ -470,14 +484,14 @@ void NewProjectAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
     {
         const float ms = apvts.getRawParameterValue (ParamIDs::recordLengthMs)->load();
         const int recordSamples = juce::jmin (irAllocatedSamples, msToSamples (getSampleRate(), ms));
-        startRecording (numChannels, recordSamples);
+        startRecording (processCh, recordSamples);
     }
 
     // Swap in a freshly rebuilt convolver bank if available.
     trySwapInPendingBank();
 
     // Always capture dry input for mixing/recording.
-    for (int ch = 0; ch < numChannels; ++ch)
+    for (int ch = 0; ch < ioChannels; ++ch)
         dryBuffer.copyFrom (ch, 0, buffer, ch, 0, numSamples);
 
     const auto state = getRunState();
@@ -489,7 +503,7 @@ void NewProjectAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
         const int remaining = targetLen - irWritePos;
         const int toCopy = juce::jlimit (0, remaining, numSamples);
 
-        for (int ch = 0; ch < numChannels; ++ch)
+        for (int ch = 0; ch < processCh; ++ch)
             irOriginalBuffers[irWriteBufferIndex].copyFrom (ch, irWritePos, dryBuffer, ch, 0, toCopy);
 
         irWritePos += toCopy;
@@ -498,26 +512,34 @@ void NewProjectAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
             finishRecordingAndRequestRebuild();
 
         // pass-through (ignore mix when IR is empty/recording)
-        for (int ch = 0; ch < numChannels; ++ch)
+        for (int ch = 0; ch < ioChannels; ++ch)
             buffer.copyFrom (ch, 0, dryBuffer, ch, 0, numSamples);
     }
     else if (state == RunState::convolving && activeBank != nullptr)
     {
+        const int convCh = juce::jlimit (0,
+                                         ioChannels,
+                                         juce::jmin (processCh, (int) activeBank->convolvers.size()));
+
         // Wet path in-place.
-        for (int ch = 0; ch < numChannels; ++ch)
+        for (int ch = 0; ch < convCh; ++ch)
             activeBank->processChannelReplacing (buffer, ch, 0, numSamples);
+
+        // Pass-through remaining channels.
+        for (int ch = convCh; ch < ioChannels; ++ch)
+            buffer.copyFrom (ch, 0, dryBuffer, ch, 0, numSamples);
 
         if (fadingOutBank != nullptr && crossfadeRemainingSamples > 0)
         {
-            for (int ch = 0; ch < numChannels; ++ch)
+            for (int ch = 0; ch < convCh; ++ch)
                 oldWetBuffer.copyFrom (ch, 0, dryBuffer, ch, 0, numSamples);
-            for (int ch = 0; ch < numChannels; ++ch)
+            for (int ch = 0; ch < convCh; ++ch)
                 fadingOutBank->processChannelReplacing (oldWetBuffer, ch, 0, numSamples);
 
             const int fadeSamplesThisBlock = juce::jmin (crossfadeRemainingSamples, numSamples);
             const int fadeStart = crossfadeTotalSamples - crossfadeRemainingSamples;
 
-            for (int ch = 0; ch < numChannels; ++ch)
+            for (int ch = 0; ch < convCh; ++ch)
             {
                 auto* wetNew = buffer.getWritePointer (ch);
                 auto* wetOld = oldWetBuffer.getReadPointer (ch);
@@ -537,12 +559,12 @@ void NewProjectAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
         const float mix = apvts.getRawParameterValue (ParamIDs::mix)->load();
         if (mix <= 0.0001f)
         {
-            for (int ch = 0; ch < numChannels; ++ch)
+            for (int ch = 0; ch < convCh; ++ch)
                 buffer.copyFrom (ch, 0, dryBuffer, ch, 0, numSamples);
         }
         else if (mix < 0.9999f)
         {
-            for (int ch = 0; ch < numChannels; ++ch)
+            for (int ch = 0; ch < convCh; ++ch)
             {
                 auto* wet = buffer.getWritePointer (ch);
                 auto* dry = dryBuffer.getReadPointer (ch);
@@ -559,7 +581,7 @@ void NewProjectAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
             requestRebuild();
 
         // Pass-through
-        for (int ch = 0; ch < numChannels; ++ch)
+        for (int ch = 0; ch < ioChannels; ++ch)
             buffer.copyFrom (ch, 0, dryBuffer, ch, 0, numSamples);
         if (! irHasContent.load (std::memory_order_acquire))
             runStateAtomic.store ((int) RunState::passThroughEmpty, std::memory_order_release);
@@ -571,7 +593,13 @@ void NewProjectAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
 
 void NewProjectAudioProcessor::parameterChanged (const juce::String& parameterID, float newValue)
 {
-    juce::ignoreUnused (newValue);
+    if (parameterID == ParamIDs::processChannels)
+    {
+        requestedProcessChannels.store (juce::jlimit (1, 16, (int) std::llround (newValue)), std::memory_order_release);
+        clearRequested.store (true, std::memory_order_release);
+        runStateAtomic.store ((int) RunState::passThroughEmpty, std::memory_order_release);
+        return;
+    }
 
     if (parameterID == ParamIDs::fadeInPct || parameterID == ParamIDs::fadeOutPct)
     {

@@ -34,6 +34,9 @@ private:
 
   juce::Label statusLabel;
   juce::Label convChannelsLabel;
+
+  juce::Label processChannelsLabel;
+  juce::Slider processChannelsSlider;
   juce::TextButton recordButton { "Record" };
   juce::TextButton clearButton { "Clear Buffer" };
 
@@ -56,6 +59,8 @@ private:
   std::unique_ptr<SliderAttachment> fadeOutAttachment;
   std::unique_ptr<SliderAttachment> mixAttachment;
   std::unique_ptr<SliderAttachment> trimAttachment;
+
+  std::unique_ptr<SliderAttachment> processChannelsAttachment;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (NewProjectAudioProcessorEditor)
 };
