@@ -131,6 +131,11 @@ private:
   juce::Slider processChannelsSlider;
   juce::TextButton recordButton { "Record" };
   juce::TextButton clearButton { "Clear Buffer" };
+  juce::TextButton loadButton { "Load" };
+  juce::TextButton saveButton { "Save" };
+
+  std::unique_ptr<juce::FileChooser> loadChooser;
+  std::unique_ptr<juce::FileChooser> saveChooser;
 
   juce::Label recordLengthMsLabel;
   juce::Label fadeInLabel;

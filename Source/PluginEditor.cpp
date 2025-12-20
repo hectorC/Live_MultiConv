@@ -78,6 +78,52 @@ NewProjectAudioProcessorEditor::NewProjectAudioProcessorEditor (NewProjectAudioP
   };
   addAndMakeVisible (clearButton);
 
+  loadButton.onClick = [this]
+  {
+    loadChooser = std::make_unique<juce::FileChooser> ("Load IR WAV...", juce::File(), "*.wav");
+    loadChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                              [this] (const juce::FileChooser& fc)
+                              {
+                                const auto f = fc.getResult();
+                                if (f.existsAsFile())
+                                {
+                                  juce::String err;
+                                  if (! audioProcessor.loadIRFromAudioFile (f, err))
+                                    juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::WarningIcon,
+                                                                            "Load IR",
+                                                                            err.isEmpty() ? "Failed to load IR." : err);
+                                  updateWaveformDisplay();
+                                }
+
+                                loadChooser.reset();
+                              });
+  };
+  addAndMakeVisible (loadButton);
+
+  saveButton.onClick = [this]
+  {
+    saveChooser = std::make_unique<juce::FileChooser> ("Save IR WAV...", juce::File ("Live_MultiConv_IR.wav"), "*.wav");
+    saveChooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
+                              [this] (const juce::FileChooser& fc)
+                              {
+                                auto f = fc.getResult();
+                                if (f != juce::File())
+                                {
+                                  if (f.getFileExtension().isEmpty())
+                                    f = f.withFileExtension ("wav");
+
+                                  juce::String err;
+                                  if (! audioProcessor.saveIRToWavFile (f, err))
+                                    juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::WarningIcon,
+                                                                            "Save IR",
+                                                                            err.isEmpty() ? "Failed to save IR." : err);
+                                }
+
+                                saveChooser.reset();
+                              });
+  };
+  addAndMakeVisible (saveButton);
+
   configureSlider (recordLengthMsSlider);
   recordLengthMsSlider.setName ("Record (ms)");
   addAndMakeVisible (recordLengthMsSlider);
@@ -145,9 +191,11 @@ void NewProjectAudioProcessorEditor::resized()
   auto r = getLocalBounds().reduced (12);
   auto top = r.removeFromTop (76);
 
-  auto buttonsArea = top.removeFromRight (230);
-  clearButton.setBounds (buttonsArea.removeFromRight (120));
-  recordButton.setBounds (buttonsArea.removeFromRight (100).reduced (0, 2));
+  auto buttonsArea = top.removeFromRight (390);
+  saveButton.setBounds (buttonsArea.removeFromRight (80));
+  loadButton.setBounds (buttonsArea.removeFromRight (80));
+  clearButton.setBounds (buttonsArea.removeFromRight (130));
+  recordButton.setBounds (buttonsArea.removeFromRight (90).reduced (0, 2));
 
   auto leftArea = top;
   leftArea.removeFromTop (22); // reserved for the title drawn in paint()

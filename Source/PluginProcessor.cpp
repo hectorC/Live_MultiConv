@@ -9,6 +9,44 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+namespace
+{
+    juce::AudioBuffer<float> resampleBuffer (const juce::AudioBuffer<float>& src,
+                                            double srcSampleRate,
+                                            double dstSampleRate,
+                                            int maxDstSamples)
+    {
+        if (dstSampleRate <= 0.0 || srcSampleRate <= 0.0 || src.getNumSamples() <= 0)
+            return src;
+
+        if (std::abs (dstSampleRate - srcSampleRate) < 1.0e-9)
+            return src;
+
+        const double ratio = srcSampleRate / dstSampleRate;
+        const int srcSamples = src.getNumSamples();
+        const int dstSamplesUnclamped = (int) std::llround ((double) srcSamples * dstSampleRate / srcSampleRate);
+        const int dstSamples = juce::jlimit (1, juce::jmax (1, maxDstSamples), dstSamplesUnclamped);
+
+        const int numChannels = src.getNumChannels();
+        juce::AudioBuffer<float> dst (numChannels, dstSamples);
+
+        // Pad input a little so the interpolator can safely read past the end.
+        juce::AudioBuffer<float> padded (numChannels, srcSamples + 8);
+        padded.clear();
+        for (int ch = 0; ch < numChannels; ++ch)
+            padded.copyFrom (ch, 0, src, ch, 0, srcSamples);
+
+        for (int ch = 0; ch < numChannels; ++ch)
+        {
+            juce::LagrangeInterpolator interp;
+            interp.reset();
+            interp.process (ratio, padded.getReadPointer (ch), dst.getWritePointer (ch), dstSamples);
+        }
+
+        return dst;
+    }
+}
+
 namespace ParamIDs
 {
     static constexpr auto recordLengthMs = "recordLengthMs";
@@ -616,6 +654,176 @@ void NewProjectAudioProcessor::triggerOneShotRecord()
 void NewProjectAudioProcessor::clearIR()
 {
     clearRequested.store (true, std::memory_order_release);
+}
+
+bool NewProjectAudioProcessor::saveIRToWavFile (const juce::File& file, juce::String& errorMessage) const
+{
+    if (! irHasContent.load (std::memory_order_acquire))
+    {
+        errorMessage = "IR buffer is empty.";
+        return false;
+    }
+
+    const int numChannels = irNumChannels.load (std::memory_order_acquire);
+    const int numSamples = irLengthSamples.load (std::memory_order_acquire);
+    const int readIndex = irReadBufferIndex.load (std::memory_order_acquire);
+
+    if (numChannels <= 0 || numSamples <= 0)
+    {
+        errorMessage = "IR buffer is empty.";
+        return false;
+    }
+
+    auto outFile = file;
+    if (outFile.getFileExtension().isEmpty())
+        outFile = outFile.withFileExtension ("wav");
+
+    auto stream = std::make_unique<juce::FileOutputStream> (outFile);
+    if (! stream->openedOk())
+    {
+        errorMessage = "Could not open file for writing.";
+        return false;
+    }
+
+    // Copy into a local buffer first (avoids holding references while writing to disk).
+    juce::AudioBuffer<float> temp (numChannels, numSamples);
+    const auto& src = irOriginalBuffers[juce::jlimit (0, 1, readIndex)];
+    for (int ch = 0; ch < numChannels; ++ch)
+        temp.copyFrom (ch, 0, src, ch, 0, numSamples);
+
+    // Requirement: project sample rate and 32-bit.
+    double sr = getSampleRate();
+    if (sr <= 0.0)
+        sr = perChannelSpec.sampleRate;
+    if (sr <= 0.0)
+        sr = irRecordedSampleRate.load (std::memory_order_acquire);
+    if (sr <= 0.0)
+        sr = 44100.0;
+
+    juce::WavAudioFormat wav;
+    juce::StringPairArray metadata;
+    std::unique_ptr<juce::AudioFormatWriter> writer (wav.createWriterFor (stream.release(),
+                                                                           sr,
+                                                                           (unsigned int) numChannels,
+                                                                           32,
+                                                                           metadata,
+                                                                           0));
+    if (writer == nullptr)
+    {
+        errorMessage = "Could not create WAV writer.";
+        return false;
+    }
+
+    if (! writer->writeFromAudioSampleBuffer (temp, 0, numSamples))
+    {
+        errorMessage = "Failed writing audio data.";
+        return false;
+    }
+
+    return true;
+}
+
+bool NewProjectAudioProcessor::loadIRFromAudioFile (const juce::File& file, juce::String& errorMessage)
+{
+    if (! file.existsAsFile())
+    {
+        errorMessage = "File does not exist.";
+        return false;
+    }
+
+    juce::AudioFormatManager fm;
+    fm.registerBasicFormats();
+
+    std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (file));
+    if (reader == nullptr)
+    {
+        errorMessage = "Unsupported audio file.";
+        return false;
+    }
+
+    const int fileChannels = (int) reader->numChannels;
+    const int numChannels = juce::jlimit (1, 16, fileChannels);
+
+    // Target: current project sample rate.
+    double hostSR = getSampleRate();
+    if (hostSR <= 0.0)
+        hostSR = perChannelSpec.sampleRate;
+    if (hostSR <= 0.0)
+        hostSR = reader->sampleRate;
+
+    const int maxIRSamples = (irAllocatedSamples > 0) ? irAllocatedSamples : msToSamples (hostSR, 2000.0f);
+
+    const juce::int64 fileLen = reader->lengthInSamples;
+    if (fileLen <= 0)
+    {
+        errorMessage = "Audio file is empty.";
+        return false;
+    }
+
+    // Clamp file length to our maximum supported IR duration (2s) at the file's sample rate.
+    const int maxSourceSamples = msToSamples (reader->sampleRate, 2000.0f);
+    const int sourceSamples = (int) juce::jlimit<juce::int64> (1, (juce::int64) maxSourceSamples, fileLen);
+
+    juce::AudioBuffer<float> fileBuf (numChannels, sourceSamples);
+    fileBuf.clear();
+
+    if (! reader->read (&fileBuf, 0, sourceSamples, 0, true, true))
+    {
+        errorMessage = "Failed reading audio file.";
+        return false;
+    }
+
+    auto loaded = resampleBuffer (fileBuf, reader->sampleRate, hostSR, maxIRSamples);
+
+    // Ensure allocations exist even if load happens before prepareToPlay().
+    if (irAllocatedChannels != 16 || irAllocatedSamples != maxIRSamples)
+    {
+        irAllocatedChannels = 16;
+        irAllocatedSamples = maxIRSamples;
+        for (auto& b : irOriginalBuffers)
+            b.setSize (irAllocatedChannels, irAllocatedSamples, true, true, true);
+    }
+
+    const int finalSamples = juce::jlimit (1, irAllocatedSamples, loaded.getNumSamples());
+
+    // Publish the loaded IR safely.
+    irGeneration.fetch_add (1, std::memory_order_acq_rel);
+    irHasContent.store (false, std::memory_order_release);
+
+    const int currentRead = irReadBufferIndex.load (std::memory_order_acquire);
+    const int stagingIndex = 1 - juce::jlimit (0, 1, currentRead);
+
+    // Copy into staging buffer.
+    for (int ch = 0; ch < numChannels; ++ch)
+        irOriginalBuffers[stagingIndex].copyFrom (ch, 0, loaded, ch, 0, finalSamples);
+    for (int ch = numChannels; ch < 16; ++ch)
+        irOriginalBuffers[stagingIndex].clear (ch, 0, finalSamples);
+
+    irNumChannels.store (numChannels, std::memory_order_release);
+    irLengthSamples.store (finalSamples, std::memory_order_release);
+    irRecordedSampleRate.store (hostSR, std::memory_order_release);
+
+    irReadBufferIndex.store (stagingIndex, std::memory_order_release);
+    irWriteBufferIndex = 1 - stagingIndex;
+
+    {
+        const juce::SpinLock::ScopedLockType lock (pendingBankLock);
+        pendingBank.reset();
+    }
+    activeBank.reset();
+    fadingOutBank.reset();
+    convolutionBankChannels.store (0, std::memory_order_release);
+    crossfadeRemainingSamples = 0;
+
+    // Safety: start dry, then user can blend back in.
+    if (auto* mixParam = apvts.getParameter (ParamIDs::mix))
+        mixParam->setValueNotifyingHost (0.0f);
+
+    irHasContent.store (true, std::memory_order_release);
+    runStateAtomic.store ((int) RunState::convolving, std::memory_order_release);
+    requestRebuild();
+
+    return true;
 }
 
 NewProjectAudioProcessor::RunState NewProjectAudioProcessor::getRunState() const

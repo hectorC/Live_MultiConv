@@ -61,6 +61,9 @@ public:
     void clearIR();
     juce::String getStatusText() const;
 
+    bool saveIRToWavFile (const juce::File& file, juce::String& errorMessage) const;
+    bool loadIRFromAudioFile (const juce::File& file, juce::String& errorMessage);
+
     int getIRChannelCount() const
     {
       return irHasContent.load (std::memory_order_acquire)
