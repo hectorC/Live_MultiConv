@@ -64,6 +64,9 @@ public:
     bool saveIRToWavFile (const juce::File& file, juce::String& errorMessage) const;
     bool loadIRFromAudioFile (const juce::File& file, juce::String& errorMessage);
 
+    void setLastIRFilename (juce::String fileNameOnly);
+    juce::String getLastIRFilename() const;
+
     int getIRChannelCount() const
     {
       return irHasContent.load (std::memory_order_acquire)
@@ -126,6 +129,8 @@ public:
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
+  void syncLastIRFilenameFromState();
+
     void parameterChanged (const juce::String& parameterID, float newValue) override;
 
     void resetForLayoutOrClear (bool keepParameters);
@@ -185,6 +190,9 @@ private:
     std::atomic<int> irLengthSamples { 0 };
     int irWritePos = 0;
     std::atomic<bool> irHasContent { false };
+
+    mutable juce::CriticalSection lastIRFilenameLock;
+    juce::String lastIRFilename;
 
     int lastKnownNumChannels = 0;
 

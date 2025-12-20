@@ -123,6 +123,7 @@ private:
   };
 
   juce::Label irWaveformLabel;
+  juce::Label irWaveformFileLabel;
   juce::Label irWaveformChannelLabel;
   juce::Slider irWaveformChannelSlider;
   IRWaveformComponent irWaveform;

@@ -654,6 +654,25 @@ void NewProjectAudioProcessor::triggerOneShotRecord()
 void NewProjectAudioProcessor::clearIR()
 {
     clearRequested.store (true, std::memory_order_release);
+    setLastIRFilename ({});
+}
+
+void NewProjectAudioProcessor::setLastIRFilename (juce::String fileNameOnly)
+{
+    const juce::ScopedLock lock (lastIRFilenameLock);
+    lastIRFilename = std::move (fileNameOnly);
+}
+
+juce::String NewProjectAudioProcessor::getLastIRFilename() const
+{
+    const juce::ScopedLock lock (lastIRFilenameLock);
+    return lastIRFilename;
+}
+
+void NewProjectAudioProcessor::syncLastIRFilenameFromState()
+{
+    const auto v = apvts.state.getProperty ("irLastFilename");
+    setLastIRFilename (v.toString());
 }
 
 bool NewProjectAudioProcessor::saveIRToWavFile (const juce::File& file, juce::String& errorMessage) const
@@ -975,6 +994,7 @@ void NewProjectAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
     constexpr juce::uint32 version = 1;
 
     auto state = apvts.copyState();
+    state.setProperty ("irLastFilename", getLastIRFilename(), nullptr);
     auto xml = state.createXml();
     const auto xmlString = (xml != nullptr ? xml->toString() : juce::String());
     const auto xmlBytes = xmlString.toRawUTF8();
@@ -1051,7 +1071,10 @@ void NewProjectAudioProcessor::setStateInformation (const void* data, int sizeIn
     {
         // Backwards compatibility with JUCE's XML binary state.
         if (auto xml = getXmlFromBinary (data, sizeInBytes))
+        {
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
+            syncLastIRFilenameFromState();
+        }
         return;
     }
 
@@ -1067,13 +1090,17 @@ void NewProjectAudioProcessor::setStateInformation (const void* data, int sizeIn
         mi.read (xmlBlock.getData(), xmlSize);
         const juce::String xmlString ((const char*) xmlBlock.getData(), (int) xmlSize);
         if (auto xml = juce::XmlDocument::parse (xmlString))
+        {
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
+            syncLastIRFilenameFromState();
+        }
     }
 
     const bool hasIR = mi.readByte() != 0;
     if (! hasIR)
     {
         resetForLayoutOrClear (true);
+        setLastIRFilename ({});
         return;
     }
 

@@ -42,6 +42,13 @@ NewProjectAudioProcessorEditor::NewProjectAudioProcessorEditor (NewProjectAudioP
   irWaveformLabel.setColour (juce::Label::textColourId, juce::Colours::white);
   addAndMakeVisible (irWaveformLabel);
 
+  configureLabel (irWaveformFileLabel, "");
+  irWaveformFileLabel.setColour (juce::Label::textColourId, juce::Colours::white.withAlpha (0.7f));
+  irWaveformFileLabel.setFont (juce::Font (juce::FontOptions (11.0f)));
+  addAndMakeVisible (irWaveformFileLabel);
+
+  irWaveformFileLabel.setText (audioProcessor.getLastIRFilename(), juce::dontSendNotification);
+
   configureLabel (irWaveformChannelLabel, "View IR Ch");
   irWaveformChannelLabel.setColour (juce::Label::textColourId, juce::Colours::white);
   addAndMakeVisible (irWaveformChannelLabel);
@@ -68,6 +75,8 @@ NewProjectAudioProcessorEditor::NewProjectAudioProcessorEditor (NewProjectAudioP
   recordButton.setClickingTogglesState (false);
   recordButton.onClick = [this]
   {
+    audioProcessor.setLastIRFilename ({});
+    irWaveformFileLabel.setText ("", juce::dontSendNotification);
     audioProcessor.triggerOneShotRecord();
   };
   addAndMakeVisible (recordButton);
@@ -75,6 +84,7 @@ NewProjectAudioProcessorEditor::NewProjectAudioProcessorEditor (NewProjectAudioP
   clearButton.onClick = [this]
   {
     audioProcessor.clearIR();
+    irWaveformFileLabel.setText (audioProcessor.getLastIRFilename(), juce::dontSendNotification);
   };
   addAndMakeVisible (clearButton);
 
@@ -92,6 +102,11 @@ NewProjectAudioProcessorEditor::NewProjectAudioProcessorEditor (NewProjectAudioP
                                     juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::WarningIcon,
                                                                             "Load IR",
                                                                             err.isEmpty() ? "Failed to load IR." : err);
+                                  else
+                                  {
+                                    audioProcessor.setLastIRFilename (f.getFileName());
+                                    irWaveformFileLabel.setText (audioProcessor.getLastIRFilename(), juce::dontSendNotification);
+                                  }
                                   updateWaveformDisplay();
                                 }
 
@@ -117,6 +132,11 @@ NewProjectAudioProcessorEditor::NewProjectAudioProcessorEditor (NewProjectAudioP
                                     juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::WarningIcon,
                                                                             "Save IR",
                                                                             err.isEmpty() ? "Failed to save IR." : err);
+                                  else
+                                  {
+                                    audioProcessor.setLastIRFilename (f.getFileName());
+                                    irWaveformFileLabel.setText (audioProcessor.getLastIRFilename(), juce::dontSendNotification);
+                                  }
                                 }
 
                                 saveChooser.reset();
@@ -206,9 +226,12 @@ void NewProjectAudioProcessorEditor::resized()
 
   {
     auto wfHeader = r.removeFromTop (24);
-    irWaveformLabel.setBounds (wfHeader.removeFromLeft (120));
     irWaveformChannelSlider.setBounds (wfHeader.removeFromRight (110));
     irWaveformChannelLabel.setBounds (wfHeader.removeFromRight (90));
+
+    auto titleArea = wfHeader;
+    irWaveformLabel.setBounds (titleArea.removeFromLeft (90));
+    irWaveformFileLabel.setBounds (titleArea);
   }
 
   irWaveform.setBounds (r.removeFromTop (120));
