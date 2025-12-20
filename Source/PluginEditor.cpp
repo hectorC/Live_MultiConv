@@ -162,11 +162,17 @@ NewProjectAudioProcessorEditor::NewProjectAudioProcessorEditor (NewProjectAudioP
   configureLabel (fadeOutLabel, "Fade Out (%)");
   addAndMakeVisible (fadeOutLabel);
 
-  configureSlider (mixSlider);
-  mixSlider.setName ("Mix");
-  addAndMakeVisible (mixSlider);
-  configureLabel (mixLabel, "Wet / Dry");
-  addAndMakeVisible (mixLabel);
+  configureSlider (drySlider);
+  drySlider.setName ("Dry Level");
+  addAndMakeVisible (drySlider);
+  configureLabel (dryLabel, "Dry Level");
+  addAndMakeVisible (dryLabel);
+
+  configureSlider (wetSlider);
+  wetSlider.setName ("Wet Level");
+  addAndMakeVisible (wetSlider);
+  configureLabel (wetLabel, "Wet Level");
+  addAndMakeVisible (wetLabel);
 
   configureSlider (trimSlider);
   trimSlider.setName ("Trim (dB)");
@@ -178,7 +184,8 @@ NewProjectAudioProcessorEditor::NewProjectAudioProcessorEditor (NewProjectAudioP
   recordLengthAttachment = std::make_unique<SliderAttachment> (apvts, "recordLengthMs", recordLengthMsSlider);
   fadeInAttachment = std::make_unique<SliderAttachment> (apvts, "fadeInPct", fadeInSlider);
   fadeOutAttachment = std::make_unique<SliderAttachment> (apvts, "fadeOutPct", fadeOutSlider);
-  mixAttachment = std::make_unique<SliderAttachment> (apvts, "mix", mixSlider);
+  dryAttachment = std::make_unique<SliderAttachment> (apvts, "dryLevel", drySlider);
+  wetAttachment = std::make_unique<SliderAttachment> (apvts, "mix", wetSlider);
   trimAttachment = std::make_unique<SliderAttachment> (apvts, "trimDb", trimSlider);
   processChannelsAttachment = std::make_unique<SliderAttachment> (apvts, "processChannels", processChannelsSlider);
 
@@ -187,7 +194,7 @@ NewProjectAudioProcessorEditor::NewProjectAudioProcessorEditor (NewProjectAudioP
   fadeOutSlider.onValueChange = [this] { updateWaveformDisplay(); };
   irWaveformChannelSlider.onValueChange = [this] { updateWaveformDisplay(); };
 
-  setSize (520, 520);
+  setSize (520, 600);
   startTimerHz (15);
 }
 
@@ -254,7 +261,8 @@ void NewProjectAudioProcessorEditor::resized()
   placeRow (processChannelsLabel, processChannelsSlider);
   placeRow (fadeInLabel, fadeInSlider);
   placeRow (fadeOutLabel, fadeOutSlider);
-  placeRow (mixLabel, mixSlider);
+  placeRow (dryLabel, drySlider);
+  placeRow (wetLabel, wetSlider);
   placeRow (trimLabel, trimSlider);
 }
 

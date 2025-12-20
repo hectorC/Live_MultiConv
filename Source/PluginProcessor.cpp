@@ -53,6 +53,7 @@ namespace ParamIDs
     static constexpr auto processChannels = "processChannels";
     static constexpr auto fadeInPct = "fadeInPct";
     static constexpr auto fadeOutPct = "fadeOutPct";
+    static constexpr auto dryLevel = "dryLevel";
     static constexpr auto mix = "mix";
     static constexpr auto trimDb = "trimDb";
 }
@@ -119,8 +120,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout NewProjectAudioProcessor::cr
         0.0f));
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        ParamIDs::dryLevel,
+        "Dry Level",
+        juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f),
+        0.0f));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
         ParamIDs::mix,
-        "Mix",
+        "Wet Level",
         juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f),
         1.0f));
 
@@ -594,20 +601,41 @@ void NewProjectAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
                 fadingOutBank.reset();
         }
 
-        const float mix = apvts.getRawParameterValue (ParamIDs::mix)->load();
-        if (mix <= 0.0001f)
+        const float wetLevel = apvts.getRawParameterValue (ParamIDs::mix)->load();
+        const float dryLevel = apvts.getRawParameterValue (ParamIDs::dryLevel)->load();
+
+        if (wetLevel <= 0.0001f && dryLevel <= 0.0001f)
+        {
+            for (int ch = 0; ch < convCh; ++ch)
+                buffer.clear (ch, 0, numSamples);
+        }
+        else if (wetLevel <= 0.0001f)
         {
             for (int ch = 0; ch < convCh; ++ch)
                 buffer.copyFrom (ch, 0, dryBuffer, ch, 0, numSamples);
+
+            if (dryLevel < 0.9999f)
+            {
+                for (int ch = 0; ch < convCh; ++ch)
+                    buffer.applyGain (ch, 0, numSamples, dryLevel);
+            }
         }
-        else if (mix < 0.9999f)
+        else if (dryLevel <= 0.0001f)
+        {
+            if (wetLevel < 0.9999f)
+            {
+                for (int ch = 0; ch < convCh; ++ch)
+                    buffer.applyGain (ch, 0, numSamples, wetLevel);
+            }
+        }
+        else
         {
             for (int ch = 0; ch < convCh; ++ch)
             {
                 auto* wet = buffer.getWritePointer (ch);
                 auto* dry = dryBuffer.getReadPointer (ch);
-                juce::FloatVectorOperations::multiply (wet, mix, numSamples);
-                juce::FloatVectorOperations::addWithMultiply (wet, dry, 1.0f - mix, numSamples);
+                juce::FloatVectorOperations::multiply (wet, wetLevel, numSamples);
+                juce::FloatVectorOperations::addWithMultiply (wet, dry, dryLevel, numSamples);
             }
         }
     }
@@ -673,6 +701,17 @@ void NewProjectAudioProcessor::syncLastIRFilenameFromState()
 {
     const auto v = apvts.state.getProperty ("irLastFilename");
     setLastIRFilename (v.toString());
+}
+
+static void migrateLegacyMixToDryLevelIfNeeded (juce::AudioProcessorValueTreeState& apvts)
+{
+    if (apvts.state.hasProperty (ParamIDs::dryLevel))
+        return;
+
+    const float wet = apvts.getRawParameterValue (ParamIDs::mix)->load();
+    const float dry = juce::jlimit (0.0f, 1.0f, 1.0f - wet);
+    if (auto* dryParam = apvts.getParameter (ParamIDs::dryLevel))
+        dryParam->setValueNotifyingHost (dry);
 }
 
 bool NewProjectAudioProcessor::saveIRToWavFile (const juce::File& file, juce::String& errorMessage) const
@@ -835,8 +874,10 @@ bool NewProjectAudioProcessor::loadIRFromAudioFile (const juce::File& file, juce
     crossfadeRemainingSamples = 0;
 
     // Safety: start dry, then user can blend back in.
-    if (auto* mixParam = apvts.getParameter (ParamIDs::mix))
-        mixParam->setValueNotifyingHost (0.0f);
+    if (auto* wetParam = apvts.getParameter (ParamIDs::mix))
+        wetParam->setValueNotifyingHost (0.0f);
+    if (auto* dryParam = apvts.getParameter (ParamIDs::dryLevel))
+        dryParam->setValueNotifyingHost (1.0f);
 
     irHasContent.store (true, std::memory_order_release);
     runStateAtomic.store ((int) RunState::convolving, std::memory_order_release);
@@ -922,8 +963,10 @@ void NewProjectAudioProcessor::finishRecordingAndRequestRebuild()
     irHasContent.store (true, std::memory_order_release);
 
     // Safety: immediately drop to fully dry before convolution starts.
-    if (auto* mixParam = apvts.getParameter (ParamIDs::mix))
-        mixParam->setValueNotifyingHost (0.0f);
+    if (auto* wetParam = apvts.getParameter (ParamIDs::mix))
+        wetParam->setValueNotifyingHost (0.0f);
+    if (auto* dryParam = apvts.getParameter (ParamIDs::dryLevel))
+        dryParam->setValueNotifyingHost (1.0f);
 
     runStateAtomic.store ((int) RunState::convolving, std::memory_order_release);
     requestRebuild();
@@ -1074,6 +1117,7 @@ void NewProjectAudioProcessor::setStateInformation (const void* data, int sizeIn
         {
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
             syncLastIRFilenameFromState();
+            migrateLegacyMixToDryLevelIfNeeded (apvts);
         }
         return;
     }
@@ -1093,6 +1137,7 @@ void NewProjectAudioProcessor::setStateInformation (const void* data, int sizeIn
         {
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
             syncLastIRFilenameFromState();
+            migrateLegacyMixToDryLevelIfNeeded (apvts);
         }
     }
 

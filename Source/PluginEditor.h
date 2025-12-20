@@ -141,13 +141,15 @@ private:
   juce::Label recordLengthMsLabel;
   juce::Label fadeInLabel;
   juce::Label fadeOutLabel;
-  juce::Label mixLabel;
+  juce::Label dryLabel;
+  juce::Label wetLabel;
   juce::Label trimLabel;
 
   juce::Slider recordLengthMsSlider;
   juce::Slider fadeInSlider;
   juce::Slider fadeOutSlider;
-  juce::Slider mixSlider;
+  juce::Slider drySlider;
+  juce::Slider wetSlider;
   juce::Slider trimSlider;
 
   using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
@@ -155,7 +157,8 @@ private:
   std::unique_ptr<SliderAttachment> recordLengthAttachment;
   std::unique_ptr<SliderAttachment> fadeInAttachment;
   std::unique_ptr<SliderAttachment> fadeOutAttachment;
-  std::unique_ptr<SliderAttachment> mixAttachment;
+  std::unique_ptr<SliderAttachment> dryAttachment;
+  std::unique_ptr<SliderAttachment> wetAttachment;
   std::unique_ptr<SliderAttachment> trimAttachment;
 
   std::unique_ptr<SliderAttachment> processChannelsAttachment;
