@@ -9,6 +9,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <cstring>
 
 //==============================================================================
 /**
@@ -65,6 +66,29 @@ public:
       return irHasContent.load (std::memory_order_acquire)
                ? irNumChannels.load (std::memory_order_acquire)
                : 0;
+    }
+
+    bool copyIRChannelSnapshot (int channelIndexZeroBased,
+                               std::vector<float>& dest,
+                               double& irSampleRate) const
+    {
+      if (! irHasContent.load (std::memory_order_acquire))
+        return false;
+
+      const int numChannels = irNumChannels.load (std::memory_order_acquire);
+      const int numSamples = irLengthSamples.load (std::memory_order_acquire);
+      const int readIndex = irReadBufferIndex.load (std::memory_order_acquire);
+
+      if (numChannels <= 0 || numSamples <= 0)
+        return false;
+
+      const int ch = juce::jlimit (0, numChannels - 1, channelIndexZeroBased);
+      const auto& src = irOriginalBuffers[juce::jlimit (0, 1, readIndex)];
+
+      dest.resize ((size_t) numSamples);
+      std::memcpy (dest.data(), src.getReadPointer (ch), (size_t) numSamples * sizeof (float));
+      irSampleRate = irRecordedSampleRate.load (std::memory_order_acquire);
+      return true;
     }
 
     int getConvolutionBufferChannelCount() const

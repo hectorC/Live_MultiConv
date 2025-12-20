@@ -38,6 +38,23 @@ NewProjectAudioProcessorEditor::NewProjectAudioProcessorEditor (NewProjectAudioP
   convChannelsLabel.setColour (juce::Label::textColourId, juce::Colours::white);
   addAndMakeVisible (convChannelsLabel);
 
+  configureLabel (irWaveformLabel, "IR Waveform");
+  irWaveformLabel.setColour (juce::Label::textColourId, juce::Colours::white);
+  addAndMakeVisible (irWaveformLabel);
+
+  configureLabel (irWaveformChannelLabel, "View IR Ch");
+  irWaveformChannelLabel.setColour (juce::Label::textColourId, juce::Colours::white);
+  addAndMakeVisible (irWaveformChannelLabel);
+
+  irWaveformChannelSlider.setSliderStyle (juce::Slider::IncDecButtons);
+  irWaveformChannelSlider.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 70, 20);
+  irWaveformChannelSlider.setRange (1.0, 1.0, 1.0);
+  irWaveformChannelSlider.setNumDecimalPlacesToDisplay (0);
+  irWaveformChannelSlider.setValue (1.0, juce::dontSendNotification);
+  addAndMakeVisible (irWaveformChannelSlider);
+
+  addAndMakeVisible (irWaveform);
+
   // Number-box style (stepper) rather than a casual slider.
   processChannelsSlider.setSliderStyle (juce::Slider::IncDecButtons);
   processChannelsSlider.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 70, 20);
@@ -99,7 +116,12 @@ NewProjectAudioProcessorEditor::NewProjectAudioProcessorEditor (NewProjectAudioP
   trimAttachment = std::make_unique<SliderAttachment> (apvts, "trimDb", trimSlider);
   processChannelsAttachment = std::make_unique<SliderAttachment> (apvts, "processChannels", processChannelsSlider);
 
-  setSize (520, 380);
+  // Ensure the displayed waveform responds immediately to fade edits and channel changes.
+  fadeInSlider.onValueChange = [this] { updateWaveformDisplay(); };
+  fadeOutSlider.onValueChange = [this] { updateWaveformDisplay(); };
+  irWaveformChannelSlider.onValueChange = [this] { updateWaveformDisplay(); };
+
+  setSize (520, 520);
   startTimerHz (15);
 }
 
@@ -131,6 +153,17 @@ void NewProjectAudioProcessorEditor::resized()
   leftArea.removeFromTop (22); // reserved for the title drawn in paint()
   statusLabel.setBounds (leftArea.removeFromTop (20));
   convChannelsLabel.setBounds (leftArea.removeFromTop (20));
+
+  r.removeFromTop (10);
+
+  {
+    auto wfHeader = r.removeFromTop (24);
+    irWaveformLabel.setBounds (wfHeader.removeFromLeft (120));
+    irWaveformChannelSlider.setBounds (wfHeader.removeFromRight (110));
+    irWaveformChannelLabel.setBounds (wfHeader.removeFromRight (90));
+  }
+
+  irWaveform.setBounds (r.removeFromTop (120));
 
   r.removeFromTop (10);
 
@@ -171,4 +204,78 @@ void NewProjectAudioProcessorEditor::timerCallback()
   const auto bankCh = audioProcessor.getConvolutionBufferChannelCount();
   const auto effectiveCh = juce::jmax (0, juce::jmin (ioCh, juce::jmin (reqCh, bankCh)));
   convChannelsLabel.setText ("Channels: " + juce::String (effectiveCh), juce::dontSendNotification);
+
+  updateWaveformDisplay();
+}
+
+void NewProjectAudioProcessorEditor::applyFadesToWaveformForDisplay (std::vector<float>& samples,
+                                                                    double fadeInPct,
+                                                                    double fadeOutPct)
+{
+  const int numSamples = (int) samples.size();
+  if (numSamples <= 0)
+    return;
+
+  const int fadeInSamples = (int) std::llround ((double) numSamples * fadeInPct * 0.01);
+  const int fadeOutSamples = (int) std::llround ((double) numSamples * fadeOutPct * 0.01);
+
+  if (fadeInSamples > 1)
+  {
+    const int n = juce::jmin (fadeInSamples, numSamples);
+    for (int i = 0; i < n; ++i)
+    {
+      const double t = (double) i / (double) (n - 1);
+      const float g = (float) (0.5 - 0.5 * std::cos (juce::MathConstants<double>::pi * t));
+      samples[(size_t) i] *= g;
+    }
+  }
+
+  if (fadeOutSamples > 1)
+  {
+    const int n = juce::jmin (fadeOutSamples, numSamples);
+    for (int i = 0; i < n; ++i)
+    {
+      const double t = (double) i / (double) (n - 1);
+      const float g = (float) (0.5 - 0.5 * std::cos (juce::MathConstants<double>::pi * t));
+      samples[(size_t) (numSamples - 1 - i)] *= g;
+    }
+  }
+}
+
+void NewProjectAudioProcessorEditor::updateWaveformDisplay()
+{
+  // Waveform selector clamps to the IR buffer channel count.
+  const int irCh = audioProcessor.getIRChannelCount();
+  const int maxIRCh = juce::jmax (1, irCh);
+  irWaveformChannelSlider.setEnabled (irCh > 0);
+
+  if ((int) std::llround (irWaveformChannelSlider.getMaximum()) != maxIRCh)
+    irWaveformChannelSlider.setRange (1.0, (double) maxIRCh, 1.0);
+
+  const int selectedOneBased = juce::jlimit (1, maxIRCh, (int) std::llround (irWaveformChannelSlider.getValue()));
+  if ((int) std::llround (irWaveformChannelSlider.getValue()) != selectedOneBased)
+    irWaveformChannelSlider.setValue ((double) selectedOneBased, juce::dontSendNotification);
+
+  if (irCh > 0)
+  {
+    std::vector<float> samples;
+    double sr = 0.0;
+    if (audioProcessor.copyIRChannelSnapshot (selectedOneBased - 1, samples, sr))
+    {
+      float rawPeak = 0.0f;
+      for (auto v : samples)
+        rawPeak = juce::jmax (rawPeak, std::abs (v));
+      if (rawPeak < 1.0e-6f)
+        rawPeak = 1.0f;
+
+      applyFadesToWaveformForDisplay (samples, fadeInSlider.getValue(), fadeOutSlider.getValue());
+      irWaveform.setSamples (std::move (samples), rawPeak);
+    }
+    else
+      irWaveform.clear();
+  }
+  else
+  {
+    irWaveform.clear();
+  }
 }

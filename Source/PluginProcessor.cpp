@@ -904,21 +904,27 @@ void NewProjectAudioProcessor::setStateInformation (const void* data, int sizeIn
     for (auto& b : irOriginalBuffers)
         b.setSize (irAllocatedChannels, irAllocatedSamples, false, false, true);
 
-    irWriteBufferIndex = 1;
-    irReadBufferIndex.store (0, std::memory_order_release);
-    irRecordedSampleRate.store (irSR, std::memory_order_release);
+    // Stage the restored IR into the write buffer, then publish by swapping the read index.
+    const int targetIndex = juce::jlimit (0, 1, irWriteBufferIndex);
 
-    irNumChannels.store (numChannels, std::memory_order_release);
-    irLengthSamples.store (numSamples, std::memory_order_release);
-    irHasContent.store (true, std::memory_order_release);
-    runStateAtomic.store ((int) RunState::convolving, std::memory_order_release);
-
-    // Copy planar float data into the read buffer.
+    // Copy planar float data into the staging buffer.
     auto* rawPtr = (const float*) raw.getData();
     for (int ch = 0; ch < numChannels; ++ch)
     {
-        irOriginalBuffers[0].copyFrom (ch, 0, rawPtr + ((size_t) ch * (size_t) numSamples), numSamples);
+        irOriginalBuffers[targetIndex].copyFrom (ch,
+                                                 0,
+                                                 rawPtr + ((size_t) ch * (size_t) numSamples),
+                                                 numSamples);
     }
+
+    irRecordedSampleRate.store (irSR, std::memory_order_release);
+    irNumChannels.store (numChannels, std::memory_order_release);
+    irLengthSamples.store (numSamples, std::memory_order_release);
+    runStateAtomic.store ((int) RunState::convolving, std::memory_order_release);
+
+    irReadBufferIndex.store (targetIndex, std::memory_order_release);
+    irWriteBufferIndex = 1 - targetIndex;
+    irHasContent.store (true, std::memory_order_release);
 
     // Trigger a rebuild using a new generation.
     const auto newGen = irGeneration.fetch_add (1, std::memory_order_acq_rel) + 1;
